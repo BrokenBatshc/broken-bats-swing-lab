@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,7 +33,8 @@ export default function LoginPage() {
           password,
         });
         if (error) throw error;
-        setMessage("Logged in successfully.");
+        // ✅ after successful login, go to dashboard
+        router.push("/dashboard");
       }
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
@@ -45,8 +48,8 @@ export default function LoginPage() {
       <h1>{mode === "login" ? "Login" : "Create an Account"}</h1>
       <p style={{ marginBottom: 16 }}>
         Use your email and password to{" "}
-        {mode === "login" ? "log in to" : "create a Broken Bats Swing Lab account for"}
-        {" "}future uploads.
+        {mode === "login" ? "log in to" : "create a Broken Bats Swing Lab account for"}{" "}
+        future uploads.
       </p>
 
       <div style={{ marginBottom: 16 }}>
