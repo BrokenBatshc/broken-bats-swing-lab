@@ -1,250 +1,210 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-  ChangeEvent,
-  FormEvent,
-} from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useState, FormEvent, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { supabase } from "@/lib/supabaseClient";
 
 type VideoRow = {
   id: string;
+  created_at: string;
   file_path: string;
-  created_at: string;
-};
-
-type Plan = "minor" | "major" | "swing";
-
-type Profile = {
-  user_id: string;
-  plan: Plan;
-  created_at: string;
+  original_name?: string | null; // optional
 };
 
 type AnalysisRow = {
   id: string;
-  user_id: string;
   video_id: string;
   feedback: string | null;
-  drills: string | string[] | null;
-  created_at: string;
+  drills: any; // we'll normalize at runtime
 };
 
-const PLAN_LIMITS: Record<Plan, number> = {
-  swing: 9999,
-  minor: 3,
-  major: 10,
+type SelectedVideo = {
+  id: string;
+  created_at: string;
+  file_path: string;
+  original_name: string | null;
+  publicUrl: string;
 };
 
 export default function DashboardPage() {
   const router = useRouter();
 
-  const [loadingUser, setLoadingUser] = useState(true);
-  const [email, setEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [weeklyCount, setWeeklyCount] = useState<number>(0);
-
-  const [uploading, setUploading] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [videos, setVideos] = useState<VideoRow[]>([]);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [videos, setVideos] = useState<SelectedVideo[]>([]);
+  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [analyses, setAnalyses] = useState<Record<string, AnalysisRow>>({});
-  const [analyzingVideoId, setAnalyzingVideoId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [globalError, setGlobalError] = useState<string | null>(null);
 
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
 
-  // Load logged-in user
+  // Load user, videos, and analyses on mount
   useEffect(() => {
-    async function loadUser() {
-      const { data, error } = await supabase.auth.getUser();
+    async function init() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      if (error || !data.user) {
+      if (!user) {
         router.push("/login");
         return;
       }
 
-      setEmail(data.user.email ?? null);
-      setUserId(data.user.id);
-      setLoadingUser(false);
+      setUserEmail(user.email ?? null);
+
+      // Load videos for this user
+      const { data: videoRows, error: videoError } = await supabase
+        .from("videos")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (videoError) {
+        console.error("Error loading videos:", videoError);
+        setGlobalError("Could not load your swings.");
+        return;
+      }
+
+      const withUrls: SelectedVideo[] =
+        (videoRows as VideoRow[] | null)?.map((v) => {
+          const { data } = supabase.storage
+            .from("swings")
+            .getPublicUrl(v.file_path);
+          return {
+            id: v.id,
+            created_at: v.created_at,
+            file_path: v.file_path,
+            original_name: v.original_name ?? null,
+            publicUrl: data.publicUrl,
+          };
+        }) ?? [];
+
+      setVideos(withUrls);
+      if (withUrls.length > 0) {
+        setSelectedVideoId(withUrls[0].id);
+      }
+
+      // Load analyses for this user
+      const { data: analysisRows, error: analysisError } = await supabase
+        .from("swing_analyses")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (analysisError) {
+        console.error("Error loading analyses:", analysisError);
+        return;
+      }
+
+      const map: Record<string, AnalysisRow> = {};
+      (analysisRows as AnalysisRow[] | null)?.forEach((a) => {
+        map[a.video_id] = a;
+      });
+
+      setAnalyses(map);
     }
 
-    loadUser();
+    void init();
   }, [router]);
 
-  // Load profile, videos, analyses
-  useEffect(() => {
-    if (!userId) return;
+  const selectedVideo =
+    (selectedVideoId && videos.find((v) => v.id === selectedVideoId)) || null;
+  const selectedAnalysis = selectedVideo
+    ? analyses[selectedVideo.id] ?? null
+    : null;
 
-    async function loadAll() {
-      try {
-        // 1) Profile (for future tiers; default to Major for now)
-        const { data: existing, error: profileError } = await supabase
-          .from("profiles")
-          .select("user_id, plan, created_at")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (profileError) throw profileError;
-
-        let profile: Profile;
-
-        if (!existing) {
-          const { data: inserted, error: insertError } = await supabase
-            .from("profiles")
-            .insert({
-              user_id: userId,
-              plan: "major",
-            })
-            .select("user_id, plan, created_at")
-            .single();
-
-          if (insertError) throw insertError;
-          profile = inserted as Profile;
-        } else {
-          profile = existing as Profile;
-        }
-
-        setProfile(profile);
-
-        // 2) Videos
-        const { data: videoData, error: videoError } = await supabase
-          .from("videos")
-          .select("id, file_path, created_at")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-
-        if (videoError) throw videoError;
-
-        const allVideos = (videoData || []) as VideoRow[];
-        setVideos(allVideos);
-
-        // Weekly count (limit still enforced in background)
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const countLastWeek = allVideos.filter((v) => {
-          return new Date(v.created_at) >= sevenDaysAgo;
-        }).length;
-        setWeeklyCount(countLastWeek);
-
-        // 3) Analyses
-        const { data: analysisData, error: analysisError } = await supabase
-          .from("swing_analyses")
-          .select("id, user_id, video_id, feedback, drills, created_at")
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false });
-
-        if (analysisError) throw analysisError;
-
-        const byVideo: Record<string, AnalysisRow> = {};
-        (analysisData || []).forEach((row) => {
-          byVideo[row.video_id] = row as AnalysisRow;
-        });
-        setAnalyses(byVideo);
-      } catch (err: any) {
-        console.error(err);
-        setError("Could not load your swings or reports.");
-      }
-    }
-
-    loadAll();
-  }, [userId]);
-
-  async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/login");
-  }
-
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      setFile(files[0]);
+  function handleFileChange() {
+    const input = fileInputRef.current;
+    if (input && input.files && input.files.length > 0) {
+      setSelectedFileName(input.files[0].name);
+    } else {
+      setSelectedFileName(null);
     }
   }
 
-  async function handleUpload(e: FormEvent) {
+  // Upload a new swing video
+  async function handleUpload(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setMessage(null);
-    setError(null);
+    setGlobalError(null);
 
-    if (!file) {
-      setError("Please choose a file first.");
-      return;
-    }
-    if (!userId || !profile) {
-      setError("You must be logged in to upload.");
+    const input = fileInputRef.current;
+    if (!input || !input.files || input.files.length === 0) {
+      setGlobalError("Please choose a video file first.");
       return;
     }
 
-    const plan = profile.plan;
-    const limit = PLAN_LIMITS[plan];
-
-    if (weeklyCount >= limit) {
-      setError(
-        `You have reached your upload limit for this period. Please wait before adding more swings.`
-      );
-      return;
-    }
+    const file = input.files[0];
+    setUploading(true);
 
     try {
-      setUploading(true);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
 
-      const timestamp = Date.now();
-      const safeName = file.name.replace(/\s+/g, "-");
-      const path = `${userId}/${timestamp}-${safeName}`;
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
 
+      // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from("swings")
-        .upload(path, file);
+        .upload(fileName, file);
 
       if (uploadError) throw uploadError;
 
-      const { data, error: insertError } = await supabase
+      // Insert DB row — only columns we know exist: user_id, file_path
+      const { data: insertRow, error: insertError } = await supabase
         .from("videos")
         .insert({
-          user_id: userId,
-          file_path: path,
+          user_id: user.id,
+          file_path: fileName,
         })
-        .select("id, file_path, created_at")
+        .select("*")
         .single();
 
       if (insertError) throw insertError;
 
-      const newVideo = data as VideoRow;
+      const { data } = supabase.storage
+        .from("swings")
+        .getPublicUrl(insertRow.file_path);
+
+      const newVideo: SelectedVideo = {
+        id: insertRow.id,
+        created_at: insertRow.created_at,
+        file_path: insertRow.file_path,
+        original_name: insertRow.original_name ?? null,
+        publicUrl: data.publicUrl,
+      };
+
       setVideos((prev) => [newVideo, ...prev]);
-      setFile(null);
-      setMessage("Upload complete! Your swing has been saved.");
-      setWeeklyCount((prev) => prev + 1);
+      setSelectedVideoId(newVideo.id);
+      input.value = "";
+      setSelectedFileName(null);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Upload failed.");
+      console.error("Upload error:", err);
+      const msg =
+        err?.message || err?.error?.message || "Upload failed. Please try again.";
+      setGlobalError(msg);
     } finally {
       setUploading(false);
     }
   }
 
-  function getVideoUrl(filePath: string) {
-    const { data } = supabase.storage.from("swings").getPublicUrl(filePath);
-    return data.publicUrl;
-  }
-
-  async function handleAnalyze(video: VideoRow) {
-    if (!userId) return;
-
-    setError(null);
-    setMessage(null);
-    setAnalyzingVideoId(video.id);
+  // Analyze a swing using the API + save analysis to DB
+  async function handleAnalyze(video: SelectedVideo) {
+    setGlobalError(null);
+    setAnalyzingId(video.id);
 
     try {
-      const videoUrl = getVideoUrl(video.file_path);
-
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoUrl }),
+        body: JSON.stringify({ videoUrl: video.publicUrl }),
       });
 
       if (!res.ok) {
@@ -252,385 +212,544 @@ export default function DashboardPage() {
       }
 
       const data = await res.json();
-      const feedback: string = data.feedback || "";
-      const drills: string[] = data.drills || [];
+      const feedback: string = data.feedback ?? "";
+      const drills: any = data.drills ?? null;
 
-      const { data: inserted, error: insertError } = await supabase
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      const { data: upsertRow, error: upsertError } = await supabase
         .from("swing_analyses")
-        .insert({
-          user_id: userId,
+        .upsert({
+          user_id: user.id,
           video_id: video.id,
           feedback,
-          drills: JSON.stringify(drills),
+          drills,
         })
-        .select("id, user_id, video_id, feedback, drills, created_at")
+        .select("*")
         .single();
 
-      if (insertError) throw insertError;
+      if (upsertError) throw upsertError;
 
-      const row = inserted as AnalysisRow;
       setAnalyses((prev) => ({
         ...prev,
-        [video.id]: row,
+        [video.id]: upsertRow,
       }));
-      setMessage("Report complete! Scroll down to see your swing report.");
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Report generation failed.");
+      console.error("Analyze error:", err);
+      const msg =
+        err?.message ||
+        err?.error?.message ||
+        "Could not generate a swing report. Please try again.";
+      setGlobalError(msg);
     } finally {
-      setAnalyzingVideoId(null);
+      setAnalyzingId(null);
     }
   }
 
-  if (loadingUser) {
-    return <p style={{ padding: 24 }}>Loading your dashboard...</p>;
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push("/login");
   }
-
-  // still computed for future plans, just not shown
-  void PLAN_LIMITS;
 
   return (
     <div
       style={{
         minHeight: "100vh",
         background: "#f3f4f6",
-        padding: "24px 12px",
+        color: "#111827",
         fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
       }}
     >
-      <div
+      {/* Header with site nav */}
+      <header
         style={{
-          maxWidth: 960,
-          margin: "0 auto",
+          borderBottom: "1px solid #e5e7eb",
+          marginBottom: 24,
+          background: "#ffffff",
         }}
       >
-        {/* Header */}
-        <header
+        <div
           style={{
+            maxWidth: 1200,
+            margin: "0 auto",
+            padding: "12px 24px",
             display: "flex",
-            justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: 24,
+            justifyContent: "space-between",
+            gap: 24,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {/* Logo – put your logo at /public/logo.png or change the src */}
+          {/* Left: logo + title */}
+          <Link
+            href="/"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              textDecoration: "none",
+            }}
+          >
             <img
               src="/logo.png"
-              alt="Broken Bats logo"
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: "50%",
-                objectFit: "cover",
-                border: "1px solid #e5e7eb",
-                background: "#111827",
-              }}
+              alt="Broken Bats Hitting Club logo"
+              style={{ width: 60, height: 60, objectFit: "contain" }}
             />
             <div>
               <div
                 style={{
-                  fontSize: 14,
-                  letterSpacing: "0.15em",
+                  fontSize: 11,
+                  letterSpacing: "0.16em",
                   textTransform: "uppercase",
                   color: "#6b7280",
                 }}
               >
                 Broken Bats Hitting Club
               </div>
-              <h1
+              <div
                 style={{
-                  margin: "4px 0 0 0",
-                  fontSize: 24,
-                  fontWeight: 700,
+                  fontSize: 18,
+                  fontWeight: 600,
+                  color: "#111827",
                 }}
               >
                 Swing Analysis Dashboard
-              </h1>
+              </div>
             </div>
-          </div>
+          </Link>
 
-          <div style={{ textAlign: "right" }}>
-            {email && (
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "#6b7280",
-                  marginBottom: 6,
-                }}
-              >
-                Logged in as <strong>{email}</strong>
-              </div>
-            )}
-            <button onClick={handleLogout}>Log Out</button>
-          </div>
-        </header>
+          {/* Middle: main site nav */}
+          <nav
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 20,
+              fontSize: 14,
+              flex: "0 0 auto",
+            }}
+          >
+            <Link href="/" style={{ textDecoration: "none", color: "#111827" }}>
+              Home
+            </Link>
+            <Link
+              href="/about-us"
+              style={{ textDecoration: "none", color: "#111827" }}
+            >
+              About Us
+            </Link>
+            <Link
+              href="/swing-lab"
+              style={{ textDecoration: "none", color: "#111827" }}
+            >
+              Swing Lab
+            </Link>
+            <Link
+              href="/drills"
+              style={{ textDecoration: "none", color: "#111827" }}
+            >
+              Drills
+            </Link>
+          </nav>
 
-        {/* Global status messages */}
-        {(message || error) && (
-          <div style={{ marginBottom: 16 }}>
-            {message && (
-              <div
-                style={{
-                  background: "#ecfdf3",
-                  border: "1px solid #22c55e",
-                  color: "#166534",
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  marginBottom: 6,
-                  fontSize: 14,
-                }}
-              >
-                {message}
-              </div>
+          {/* Right: user + logout */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              fontSize: 13,
+              flex: "0 0 auto",
+            }}
+          >
+            {userEmail && (
+              <span style={{ color: "#6b7280" }}>Logged in as {userEmail}</span>
             )}
-            {error && (
-              <div
-                style={{
-                  background: "#fef2f2",
-                  border: "1px solid #ef4444",
-                  color: "#991b1b",
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  fontSize: 14,
-                }}
-              >
-                {error}
-              </div>
-            )}
+            <button
+              onClick={handleLogout}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              Log Out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main
+        style={{
+          maxWidth: 1200,
+          margin: "0 auto",
+          padding: "0 24px 40px",
+        }}
+      >
+        {globalError && (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: "1px solid #fecaca",
+              background: "#fef2f2",
+              color: "#991b1b",
+              fontSize: 14,
+            }}
+          >
+            {globalError}
           </div>
         )}
 
-        {/* Content layout */}
-        <div
+        {/* Upload card */}
+        <section
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 24,
+            marginBottom: 24,
+            background: "#ffffff",
+            borderRadius: 12,
+            padding: 20,
+            boxShadow: "0 10px 25px rgba(15,23,42,0.06)",
+            border: "1px solid #e5e7eb",
           }}
         >
-          {/* Upload card */}
-          <section
+          <h2
             style={{
-              background: "#ffffff",
-              borderRadius: 12,
-              padding: 20,
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08)",
+              fontSize: 18,
+              marginTop: 0,
+              marginBottom: 8,
             }}
           >
-            <h2
+            Upload a Swing
+          </h2>
+          <p
+            style={{
+              fontSize: 14,
+              color: "#4b5563",
+              marginTop: 0,
+              marginBottom: 16,
+            }}
+          >
+            Choose a short clip that clearly shows the full swing (side view is
+            best). Once it&apos;s uploaded, select the swing below and click{" "}
+            <strong>Analyze Swing</strong> to get a detailed report.
+          </p>
+
+          <form
+            onSubmit={handleUpload}
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+              alignItems: "center",
+            }}
+          >
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              name="swingFile"
+              accept="video/*"
+              onChange={handleFileChange}
+              style={{ display: "none" }}
+            />
+
+            {/* Visible "Select" button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
               style={{
-                marginTop: 0,
-                marginBottom: 8,
-                fontSize: 18,
-              }}
-            >
-              Upload a Swing
-            </h2>
-            <p
-              style={{
-                marginTop: 0,
-                marginBottom: 16,
+                padding: "8px 16px",
+                borderRadius: 999,
+                border: "1px solid #d1d5db",
+                background: "#ffffff",
+                color: "#111827",
                 fontSize: 14,
-                color: "#4b5563",
-                maxWidth: 640,
+                cursor: "pointer",
               }}
             >
-              Choose a short clip that clearly shows the full swing (side view is
-              best). Once it&apos;s uploaded, click{" "}
-              <strong>Analyze Swing</strong> to get a detailed swing report and
-              recommended drills.
-            </p>
+              {selectedFileName ? "Change Video File" : "Select Video File"}
+            </button>
 
-            <form
-              onSubmit={handleUpload}
+            {/* File name / status text */}
+            <span
               style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-                maxWidth: 420,
+                fontSize: 13,
+                color: "#6b7280",
+                minWidth: 160,
               }}
             >
-              <input
-                type="file"
-                accept="video/*"
-                onChange={handleFileChange}
-              />
+              {selectedFileName || "No file selected yet."}
+            </span>
 
-              <button type="submit" disabled={uploading}>
-                {uploading ? "Uploading..." : "Upload Swing Video"}
-              </button>
-            </form>
-          </section>
+            {/* Upload button */}
+            <button
+              type="submit"
+              disabled={uploading}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 999,
+                border: "none",
+                background: "#111827",
+                color: "#f9fafb",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {uploading ? "Uploading..." : "Upload Swing Video"}
+            </button>
+          </form>
+        </section>
 
-          {/* Swings list */}
+        {/* If no swings yet */}
+        {videos.length === 0 && (
           <section
             style={{
               background: "#ffffff",
               borderRadius: 12,
               padding: 20,
-              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08)",
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+              color: "#6b7280",
             }}
           >
-            {videos.length === 0 ? (
-              <p
+            No swings uploaded yet. Start by uploading a video above.
+          </section>
+        )}
+
+        {/* Swings + report layout */}
+        {videos.length > 0 && selectedVideo && (
+          <section
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
+              gap: 20,
+              alignItems: "flex-start",
+            }}
+          >
+            {/* Left: video list + player */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Video list */}
+              <div
                 style={{
-                  fontSize: 14,
-                  color: "#4b5563",
+                  background: "#ffffff",
+                  borderRadius: 12,
+                  padding: 12,
+                  border: "1px solid #e5e7eb",
+                  maxHeight: 220,
+                  overflowY: "auto",
                 }}
               >
-                No swings uploaded yet. Start by uploading a video above.
-              </p>
-            ) : (
-              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {videos.map((v) => {
-                  const url = getVideoUrl(v.file_path);
-                  const analysis = analyses[v.id];
-
-                  let drillsList: string[] = [];
-                  if (analysis?.drills) {
-                    if (typeof analysis.drills === "string") {
-                      try {
-                        drillsList = JSON.parse(analysis.drills);
-                      } catch {
-                        drillsList = [analysis.drills];
-                      }
-                    } else {
-                      drillsList = analysis.drills;
-                    }
-                  }
-
-                  return (
-                    <li
-                      key={v.id}
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    marginBottom: 8,
+                  }}
+                >
+                  Your Swings
+                </div>
+                {videos.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => setSelectedVideoId(v.id)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border:
+                        v.id === selectedVideoId
+                          ? "1px solid #111827"
+                          : "1px solid transparent",
+                      background:
+                        v.id === selectedVideoId ? "#e5e7eb" : "transparent",
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    <div style={{ fontWeight: 500 }}>
+                      {v.original_name || "Uploaded swing"}
+                    </div>
+                    <div
                       style={{
-                        marginBottom: 24,
-                        paddingBottom: 16,
-                        borderBottom: "1px solid #e5e7eb",
+                        fontSize: 12,
+                        color: "#6b7280",
                       }}
                     >
-                      <div
-                        style={{
-                          marginBottom: 8,
-                          fontSize: 13,
-                          color: "#6b7280",
-                        }}
-                      >
-                        <strong>
-                          {new Date(v.created_at).toLocaleString()}
-                        </strong>
-                      </div>
+                      {new Date(v.created_at).toLocaleString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
 
-                      {/* Video + report side-by-side */}
-                      <div
-                        style={{
-                          display: "flex",
-                          flexWrap: "wrap",
-                          gap: 16,
-                        }}
-                      >
-                        {/* Video column */}
+              {/* Player + Analyze button */}
+              <div
+                style={{
+                  background: "#ffffff",
+                  borderRadius: 12,
+                  padding: 12,
+                  border: "1px solid #e5e7eb",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Selected Swing
+                  </div>
+                  <button
+                    onClick={() => handleAnalyze(selectedVideo)}
+                    disabled={analyzingId === selectedVideo.id}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 999,
+                      border: "none",
+                      background: "#111827",
+                      color: "#f9fafb",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {analyzingId === selectedVideo.id
+                      ? "Analyzing..."
+                      : "Analyze Swing"}
+                  </button>
+                </div>
+
+                <video
+                  src={selectedVideo.publicUrl}
+                  controls
+                  style={{
+                    width: "100%",
+                    borderRadius: 8,
+                    background: "#000000",
+                  }}
+                >
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+            </div>
+
+            {/* Right: Swing Report */}
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: 12,
+                padding: 16,
+                border: "1px solid #e5e7eb",
+                // let this grow and use page scroll
+              }}
+            >
+              <h2
+                style={{
+                  fontSize: 18,
+                  marginTop: 0,
+                  marginBottom: 8,
+                }}
+              >
+                Swing Report
+              </h2>
+
+              {!selectedAnalysis && (
+                <p
+                  style={{
+                    fontSize: 14,
+                    color: "#6b7280",
+                  }}
+                >
+                  No report yet for this swing. Click{" "}
+                  <strong>Analyze Swing</strong> to generate one.
+                </p>
+              )}
+
+              {selectedAnalysis && (
+                <>
+                  {/* Feedback text */}
+                  <div
+                    style={{
+                      fontSize: 14,
+                      color: "#111827",
+                      whiteSpace: "pre-wrap",
+                      marginBottom: 16,
+                    }}
+                  >
+                    {selectedAnalysis.feedback}
+                  </div>
+
+                  {/* Normalized drills list */}
+                  {(() => {
+                    let drills: string[] = [];
+                    const raw = selectedAnalysis.drills;
+
+                    if (Array.isArray(raw)) {
+                      drills = raw as string[];
+                    } else if (typeof raw === "string" && raw.trim() !== "") {
+                      try {
+                        const parsed = JSON.parse(raw);
+                        if (Array.isArray(parsed)) {
+                          drills = parsed;
+                        } else {
+                          drills = [raw];
+                        }
+                      } catch {
+                        drills = [raw];
+                      }
+                    }
+
+                    if (drills.length === 0) return null;
+
+                    return (
+                      <div>
                         <div
                           style={{
-                            flex: "0 1 360px",
-                            maxWidth: "100%",
+                            fontSize: 14,
+                            fontWeight: 600,
+                            marginBottom: 4,
                           }}
                         >
-                          <video
-                            src={url}
-                            controls
-                            style={{
-                              maxWidth: "100%",
-                              width: 360,
-                              display: "block",
-                              marginBottom: 8,
-                              borderRadius: 8,
-                              border: "1px solid #e5e7eb",
-                            }}
-                          />
-
-                          <div style={{ marginBottom: 8 }}>
-                            <button
-                              onClick={() => handleAnalyze(v)}
-                              disabled={
-                                !!analysis || analyzingVideoId === v.id
-                              }
-                            >
-                              {analysis
-                                ? "Swing Report Ready"
-                                : analyzingVideoId === v.id
-                                ? "Creating Report..."
-                                : "Analyze Swing"}
-                            </button>
-                          </div>
+                          Recommended Drills
                         </div>
-
-                        {/* Report column */}
-                        {analysis && (
-                          <div
-                            style={{
-                              flex: "1 1 260px",
-                              minWidth: 260,
-                              background: "#f9fafb",
-                              borderRadius: 8,
-                              padding: 12,
-                              fontSize: 14,
-                            }}
-                          >
-                            <h3
-                              style={{
-                                marginTop: 0,
-                                marginBottom: 6,
-                                fontSize: 15,
-                              }}
-                            >
-                              Swing Report
-                            </h3>
-                            <p
-                              style={{
-                                whiteSpace: "pre-wrap",
-                                marginTop: 0,
-                                marginBottom: 8,
-                              }}
-                            >
-                              {analysis.feedback}
-                            </p>
-
-                            {drillsList.length > 0 && (
-                              <>
-                                <h4
-                                  style={{
-                                    marginTop: 0,
-                                    marginBottom: 4,
-                                    fontSize: 14,
-                                  }}
-                                >
-                                  Recommended Drills
-                                </h4>
-                                <ul
-                                  style={{
-                                    paddingLeft: 20,
-                                    marginTop: 0,
-                                    marginBottom: 0,
-                                  }}
-                                >
-                                  {drillsList.map((d, i) => (
-                                    <li key={i}>{d}</li>
-                                  ))}
-                                </ul>
-                              </>
-                            )}
-                          </div>
-                        )}
+                        <ul
+                          style={{
+                            paddingLeft: 18,
+                            margin: 0,
+                            fontSize: 14,
+                            color: "#111827",
+                          }}
+                        >
+                          {drills.map((d, idx) => (
+                            <li key={idx}>{d}</li>
+                          ))}
+                        </ul>
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                    );
+                  })()}
+                </>
+              )}
+            </div>
           </section>
-        </div>
-      </div>
+        )}
+      </main>
     </div>
   );
 }

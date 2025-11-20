@@ -1,91 +1,218 @@
-// app/swing-lab/page.tsx
+import Link from "next/link";
+
 export default function SwingLabPage() {
   return (
-    <div>
-      <section style={{ marginBottom: 32 }}>
-        <h1>Broken Bats Swing Lab</h1>
-        <p>AI-assisted swing analysis with real coaching behind it.</p>
-      </section>
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#f3f4f6",
+        color: "#111827",
+        fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      }}
+    >
+      {/* Header */}
+      <header
+        style={{
+          borderBottom: "1px solid #e5e7eb",
+          marginBottom: 24,
+          background: "#ffffff",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1200,
+            margin: "0 auto",
+            padding: "12px 24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 24,
+          }}
+        >
+          <Link
+            href="/"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              textDecoration: "none",
+            }}
+          >
+            <img
+              src="/logo.png"
+              alt="Broken Bats Hitting Club logo"
+              style={{ width: 160, height: 160, objectFit: "contain" }}
+            />
+          </Link>
 
-      <section style={{ marginBottom: 32 }}>
-        <h2>How It Works</h2>
-        <ol>
-          <li>
-            <strong>Upload your swing</strong> – Record from the open side or
-            slightly behind and upload via your account.
-          </li>
-          <li>
-            <strong>AI analyzes your mechanics</strong> – The system tracks body
-            positions, timing, and bat path and flags issues.
-          </li>
-          <li>
-            <strong>Get feedback, drills, and reviews</strong> – Receive a
-            written breakdown, drills, and on Major League plans, a monthly
-            human trainer review.
-          </li>
-        </ol>
-      </section>
+          <nav
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 24,
+              fontSize: 14,
+            }}
+          >
+            <Link href="/" style={{ textDecoration: "none", color: "#111827" }}>
+              Home
+            </Link>
+            <Link
+              href="/about-us"
+              style={{ textDecoration: "none", color: "#111827" }}
+            >
+              About Us
+            </Link>
+            <Link
+              href="/swing-lab"
+              style={{ textDecoration: "none", color: "#111827" }}
+            >
+              Swing Lab
+            </Link>
+            <Link
+              href="/drills"
+              style={{ textDecoration: "none", color: "#111827" }}
+            >
+              Drills
+            </Link>
+            <Link
+              href="/login"
+              style={{ textDecoration: "none", color: "#111827" }}
+            >
+              Login
+            </Link>
+          </nav>
+        </div>
+      </header>
 
-      <section id="pricing" style={{ marginBottom: 32 }}>
-        <h2>Plans & Pricing</h2>
+      {/* Content */}
+      <main
+        style={{
+          maxWidth: 900,
+          margin: "0 auto",
+          padding: "0 24px 40px",
+        }}
+      >
+        <h1
+          style={{
+            fontSize: 32,
+            marginBottom: 12,
+          }}
+        >
+          Swing Lab – Remote Swing Analysis
+        </h1>
 
-        <h3>Swing Analysis – $75 per analysis</h3>
-        <p>Perfect for a one-time “checkup” on your swing.</p>
-        <ul>
-          <li>Upload a single video.</li>
-          <li>AI breakdown of your swing.</li>
-          <li>Written report in plain language.</li>
-          <li>3–5 drill recommendations.</li>
-        </ul>
-
-        <h3>Minor League – $150 / month</h3>
-        <p>For hitters who want steady feedback and a weekly focus.</p>
-        <ul>
-          <li>Up to 3 video uploads per week.</li>
-          <li>AI feedback and drill recommendations on each upload.</li>
-          <li>AI learns your patterns and refines cues over time.</li>
-          <li>Access to members-only drills library.</li>
-        </ul>
-
-        <h3>Major League – $225 / month</h3>
-        <p>For serious hitters who want near-daily feedback and a coach.</p>
-        <ul>
-          <li>Up to 10 video uploads per week.</li>
-          <li>AI feedback and drills on each upload.</li>
-          <li>AI builds a deeper profile of your swing over time.</li>
-          <li>
-            Monthly human trainer review of recent swings with added notes and
-            adjustments.
-          </li>
-          <li>
-            Blast Motion data integration via a simple form submitted with your
-            video.
-          </li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>FAQ</h2>
-        <h4>What ages do you work with?</h4>
-        <p>
-          We primarily work with youth, high school, and college hitters. If the
-          athlete can safely swing a bat and follow simple instructions, we can
-          help.
+        <p
+          style={{
+            fontSize: 15,
+            color: "#4b5563",
+            marginBottom: 12,
+          }}
+        >
+          Swing Lab is our video-based hitting service. Players send in a swing
+          and receive a detailed written report plus specific drills to work on
+          at home or in the cage. It feels like a one-on-one lesson even when
+          you can&apos;t be in the facility.
         </p>
 
-        <h4>How do I record the swing?</h4>
-        <p>
-          Use your phone, film from the open side or slightly behind, and make
-          sure we can see the full body and bat through contact.
-        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 16,
+            marginTop: 24,
+            marginBottom: 24,
+          }}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              padding: 16,
+              borderRadius: 8,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 18,
+                marginTop: 0,
+                marginBottom: 8,
+              }}
+            >
+              1. Upload Your Swing
+            </h2>
+            <p style={{ margin: 0, color: "#4b5563" }}>
+              Use your phone to record a clear side-view swing. Create an
+              account, log in, and upload the clip through your Swing Lab
+              dashboard.
+            </p>
+          </div>
 
-        <h4>How fast is feedback?</h4>
-        <p>
-          Our goal is to return AI feedback within a short window after upload.
-          Exact turnaround times can vary as we grow, but we&apos;ll be clear in
-          your account dashboard.
-        </p>
-      </section>
+          <div
+            style={{
+              background: "#ffffff",
+              padding: 16,
+              borderRadius: 8,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 18,
+                marginTop: 0,
+                marginBottom: 8,
+              }}
+            >
+              2. Get a Swing Report
+            </h2>
+            <p style={{ margin: 0, color: "#4b5563" }}>
+              We break down what you&apos;re doing well and the 2–4 biggest
+              things to fix, written directly to the player in simple language.
+            </p>
+          </div>
+
+          <div
+            style={{
+              background: "#ffffff",
+              padding: 16,
+              borderRadius: 8,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 18,
+                marginTop: 0,
+                marginBottom: 8,
+              }}
+            >
+              3. Get Specific Drills
+            </h2>
+            <p style={{ margin: 0, color: "#4b5563" }}>
+              Each report includes 3–6 drills tailored to that swing so players
+              know exactly what to work on in their next practice.
+            </p>
+          </div>
+        </div>
+
+        <Link
+          href="/login"
+          style={{
+            display: "inline-flex",
+            padding: "10px 18px",
+            borderRadius: 999,
+            background: "#111827",
+            color: "#f9fafb",
+            textDecoration: "none",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          Log In or Create an Account
+        </Link>
+      </main>
     </div>
   );
 }

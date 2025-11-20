@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export default function DrillsPage() {
+export default function AboutUsPage() {
   return (
     <div
       style={{
@@ -98,102 +98,45 @@ export default function DrillsPage() {
             marginBottom: 12,
           }}
         >
-          Drills Library
+          About Broken Bats Hitting Club
         </h1>
 
         <p
           style={{
             fontSize: 15,
             color: "#4b5563",
-            marginBottom: 20,
+            marginBottom: 12,
           }}
         >
-          This page will become a library of Broken Bats drills. For now, here
-          are a few example ideas and placeholders. Later, we can lock this
-          down for members only and link drills directly from each swing
-          report.
+          {/* Placeholder – you can replace this with your real story later */}
+          Welcome to Broken Bats Hitting Club, where our passion for player development meets cutting-edge technology. Located in Dallas, GA, our small, player-focused facility is dedicated to helping athletes of all ages and skill levels elevate their game.
+We combine advanced tools like Rapsodo and Blast with modern AI-powered swing analysis to break down every detail of the hitter’s movement. Our AI technology helps identify patterns, inefficiencies, and opportunities for improvement in each swing, while our experienced coaches step in with human insight, clear explanations, and customized drills. The result is the best of both worlds: data-driven feedback plus real coaching that players can understand and apply.
+At Broken Bats, we focus on individual growth, confidence, and long-term development—not just quick fixes. Every session is designed to help players build better habits, make smarter adjustments, and ultimately reach their full potential at the plate.
+Follow us on social media @brokenbatshc or give us a call to start your training experience with Broken Bats Hitting Club today.
         </p>
 
-        <div
+        <p
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: 16,
+            fontSize: 15,
+            color: "#4b5563",
+            marginBottom: 12,
           }}
         >
-          <div
-            style={{
-              background: "#ffffff",
-              padding: 16,
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          >
-            <h2
-              style={{
-                fontSize: 18,
-                marginTop: 0,
-                marginBottom: 8,
-              }}
-            >
-              Walk-In Load Drill
-            </h2>
-            <p style={{ margin: 0, color: "#4b5563" }}>
-              Helps players feel rhythm and timing with the lower half. Great
-              for athletes who rush their stride or get stuck on the back leg.
-            </p>
-          </div>
+          This is placeholder copy for now. You can update this section with
+          your origin story, coaching philosophy, and anything else parents need
+          to know about why Broken Bats is different.
+        </p>
 
-          <div
-            style={{
-              background: "#ffffff",
-              padding: 16,
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          >
-            <h2
-              style={{
-                fontSize: 18,
-                marginTop: 0,
-                marginBottom: 8,
-              }}
-            >
-              Separation Slow-Mo Swings
-            </h2>
-            <p style={{ margin: 0, color: "#4b5563" }}>
-              Focus on coil, stretch, and staying connected. Perfect for
-              cleaning up early hand movement or drifting forward.
-            </p>
-          </div>
-
-          <div
-            style={{
-              background: "#ffffff",
-              padding: 16,
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          >
-            <h2
-              style={{
-                fontSize: 18,
-                marginTop: 0,
-                marginBottom: 8,
-              }}
-            >
-              Two-Tee Adjustability Work
-            </h2>
-            <p style={{ margin: 0, color: "#4b5563" }}>
-              Teaches hitters to keep the barrel through the zone instead of
-              cutting across the ball. Great for players who roll over or clip
-              under.
-            </p>
-          </div>
-        </div>
+        <p
+          style={{
+            fontSize: 15,
+            color: "#4b5563",
+          }}
+        >
+          Use this space to share your mission, the ages you work with, and what
+          players can expect when they walk into the facility for the first
+          time.
+        </p>
       </main>
     </div>
   );
