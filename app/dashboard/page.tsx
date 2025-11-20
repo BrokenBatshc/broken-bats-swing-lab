@@ -38,12 +38,6 @@ const PLAN_LIMITS: Record<Plan, number> = {
   major: 10,
 };
 
-const PLAN_LABELS: Record<Plan, string> = {
-  swing: "Swing Analysis (per-clip)",
-  minor: "Minor League – 3 uploads/week",
-  major: "Major League – 10 uploads/week",
-};
-
 export default function DashboardPage() {
   const router = useRouter();
 
@@ -87,7 +81,7 @@ export default function DashboardPage() {
 
     async function loadAll() {
       try {
-        // 1) Profile
+        // 1) Profile (for future tiers; default to Major for now)
         const { data: existing, error: profileError } = await supabase
           .from("profiles")
           .select("user_id, plan, created_at")
@@ -128,7 +122,7 @@ export default function DashboardPage() {
         const allVideos = (videoData || []) as VideoRow[];
         setVideos(allVideos);
 
-        // Weekly count
+        // Weekly count (limit still enforced in background)
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const countLastWeek = allVideos.filter((v) => {
@@ -152,7 +146,7 @@ export default function DashboardPage() {
         setAnalyses(byVideo);
       } catch (err: any) {
         console.error(err);
-        setError("Could not load your profile, videos, or analyses.");
+        setError("Could not load your swings or reports.");
       }
     }
 
@@ -190,7 +184,7 @@ export default function DashboardPage() {
 
     if (weeklyCount >= limit) {
       setError(
-        `You have reached your weekly limit for the ${PLAN_LABELS[plan]} plan (${limit} uploads per rolling 7 days).`
+        `You have reached your upload limit for this period. Please wait before adding more swings.`
       );
       return;
     }
@@ -254,14 +248,13 @@ export default function DashboardPage() {
       });
 
       if (!res.ok) {
-        throw new Error("Analysis request failed");
+        throw new Error("Report request failed");
       }
 
       const data = await res.json();
       const feedback: string = data.feedback || "";
       const drills: string[] = data.drills || [];
 
-      // Save to Supabase
       const { data: inserted, error: insertError } = await supabase
         .from("swing_analyses")
         .insert({
@@ -280,173 +273,364 @@ export default function DashboardPage() {
         ...prev,
         [video.id]: row,
       }));
-      setMessage("Analysis complete! Scroll down to see your feedback.");
+      setMessage("Report complete! Scroll down to see your swing report.");
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Analysis failed.");
+      setError(err.message || "Report generation failed.");
     } finally {
       setAnalyzingVideoId(null);
     }
   }
 
   if (loadingUser) {
-    return <p>Loading your dashboard...</p>;
+    return <p style={{ padding: 24 }}>Loading your dashboard...</p>;
   }
 
-  const plan = profile?.plan ?? "major";
-  const limit = PLAN_LIMITS[plan];
-  const uploadsLeft = Math.max(limit - weeklyCount, 0);
+  // still computed for future plans, just not shown
+  void PLAN_LIMITS;
 
   return (
-    <div>
-      <h1>Dashboard</h1>
-      <p>Welcome{email ? `, ${email}` : ""}.</p>
-
-      <p style={{ marginTop: 8 }}>
-        <strong>Current Plan:</strong> {PLAN_LABELS[plan]}
-      </p>
-      <p>
-        <strong>Uploads this week:</strong> {weeklyCount} / {limit} &nbsp;|&nbsp;
-        <strong>Remaining:</strong> {uploadsLeft}
-      </p>
-
-      <button
-        style={{ marginTop: 16, marginBottom: 32 }}
-        onClick={handleLogout}
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#f3f4f6",
+        padding: "24px 12px",
+        fontFamily: "-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 960,
+          margin: "0 auto",
+        }}
       >
-        Log Out
-      </button>
+        {/* Header */}
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 24,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* Logo – put your logo at /public/logo.png or change the src */}
+            <img
+              src="/logo.png"
+              alt="Broken Bats logo"
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: "1px solid #e5e7eb",
+                background: "#111827",
+              }}
+            />
+            <div>
+              <div
+                style={{
+                  fontSize: 14,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
+                  color: "#6b7280",
+                }}
+              >
+                Broken Bats Hitting Club
+              </div>
+              <h1
+                style={{
+                  margin: "4px 0 0 0",
+                  fontSize: 24,
+                  fontWeight: 700,
+                }}
+              >
+                Swing Analysis Dashboard
+              </h1>
+            </div>
+          </div>
 
-      <section style={{ marginBottom: 32 }}>
-        <h2>Upload a Swing Video</h2>
-        <p>Select a clip from your phone or computer to save it.</p>
+          <div style={{ textAlign: "right" }}>
+            {email && (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#6b7280",
+                  marginBottom: 6,
+                }}
+              >
+                Logged in as <strong>{email}</strong>
+              </div>
+            )}
+            <button onClick={handleLogout}>Log Out</button>
+          </div>
+        </header>
 
-        <form
-          onSubmit={handleUpload}
+        {/* Global status messages */}
+        {(message || error) && (
+          <div style={{ marginBottom: 16 }}>
+            {message && (
+              <div
+                style={{
+                  background: "#ecfdf3",
+                  border: "1px solid #22c55e",
+                  color: "#166534",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  marginBottom: 6,
+                  fontSize: 14,
+                }}
+              >
+                {message}
+              </div>
+            )}
+            {error && (
+              <div
+                style={{
+                  background: "#fef2f2",
+                  border: "1px solid #ef4444",
+                  color: "#991b1b",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  fontSize: 14,
+                }}
+              >
+                {error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Content layout */}
+        <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: 12,
-            maxWidth: 400,
+            gap: 24,
           }}
         >
-          <input type="file" accept="video/*" onChange={handleFileChange} />
+          {/* Upload card */}
+          <section
+            style={{
+              background: "#ffffff",
+              borderRadius: 12,
+              padding: 20,
+              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08)",
+            }}
+          >
+            <h2
+              style={{
+                marginTop: 0,
+                marginBottom: 8,
+                fontSize: 18,
+              }}
+            >
+              Upload a Swing
+            </h2>
+            <p
+              style={{
+                marginTop: 0,
+                marginBottom: 16,
+                fontSize: 14,
+                color: "#4b5563",
+                maxWidth: 640,
+              }}
+            >
+              Choose a short clip that clearly shows the full swing (side view is
+              best). Once it&apos;s uploaded, click{" "}
+              <strong>Analyze Swing</strong> to get a detailed swing report and
+              recommended drills.
+            </p>
 
-          <button type="submit" disabled={uploading}>
-            {uploading ? "Uploading..." : "Upload Swing"}
-          </button>
-        </form>
+            <form
+              onSubmit={handleUpload}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                maxWidth: 420,
+              }}
+            >
+              <input
+                type="file"
+                accept="video/*"
+                onChange={handleFileChange}
+              />
 
-        {message && (
-          <p style={{ marginTop: 8, color: "green" }}>{message}</p>
-        )}
-        {error && <p style={{ marginTop: 8, color: "red" }}>{error}</p>}
-      </section>
+              <button type="submit" disabled={uploading}>
+                {uploading ? "Uploading..." : "Upload Swing Video"}
+              </button>
+            </form>
+          </section>
 
-      <section>
-        <h2>Your Uploaded Swings</h2>
-        {videos.length === 0 ? (
-          <p>No swings uploaded yet.</p>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0 }}>
-            {videos.map((v) => {
-              const url = getVideoUrl(v.file_path);
-              const analysis = analyses[v.id];
+          {/* Swings list */}
+          <section
+            style={{
+              background: "#ffffff",
+              borderRadius: 12,
+              padding: 20,
+              boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08)",
+            }}
+          >
+            {videos.length === 0 ? (
+              <p
+                style={{
+                  fontSize: 14,
+                  color: "#4b5563",
+                }}
+              >
+                No swings uploaded yet. Start by uploading a video above.
+              </p>
+            ) : (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {videos.map((v) => {
+                  const url = getVideoUrl(v.file_path);
+                  const analysis = analyses[v.id];
 
-              let drillsList: string[] = [];
-              if (analysis?.drills) {
-                if (typeof analysis.drills === "string") {
-                  try {
-                    drillsList = JSON.parse(analysis.drills);
-                  } catch {
-                    drillsList = [analysis.drills];
+                  let drillsList: string[] = [];
+                  if (analysis?.drills) {
+                    if (typeof analysis.drills === "string") {
+                      try {
+                        drillsList = JSON.parse(analysis.drills);
+                      } catch {
+                        drillsList = [analysis.drills];
+                      }
+                    } else {
+                      drillsList = analysis.drills;
+                    }
                   }
-                } else {
-                  drillsList = analysis.drills;
-                }
-              }
 
-              return (
-                <li
-                  key={v.id}
-                  style={{
-                    marginBottom: 24,
-                    paddingBottom: 16,
-                    borderBottom: "1px solid #ddd",
-                  }}
-                >
-                  <div style={{ marginBottom: 4 }}>
-                    <strong>
-                      {new Date(v.created_at).toLocaleString()}
-                    </strong>
-                  </div>
-
-                  <video
-                    src={url}
-                    controls
-                    style={{
-                      maxWidth: "100%",
-                      width: 320,
-                      display: "block",
-                      marginBottom: 8,
-                    }}
-                  />
-
-                  <div style={{ marginBottom: 8 }}>
-                    <button
-                      onClick={() => handleAnalyze(v)}
-                      disabled={!!analysis || analyzingVideoId === v.id}
-                    >
-                      {analysis
-                        ? "Analysis Complete"
-                        : analyzingVideoId === v.id
-                        ? "Analyzing..."
-                        : "Analyze Swing"}
-                    </button>
-                  </div>
-
-                  {analysis && (
-                    <div
+                  return (
+                    <li
+                      key={v.id}
                       style={{
-                        background: "#f6f6f6",
-                        padding: 12,
-                        borderRadius: 4,
+                        marginBottom: 24,
+                        paddingBottom: 16,
+                        borderBottom: "1px solid #e5e7eb",
                       }}
                     >
-                      <h3 style={{ marginTop: 0, marginBottom: 8 }}>
-                        AI Feedback
-                      </h3>
-                      <p style={{ whiteSpace: "pre-wrap" }}>
-                        {analysis.feedback}
-                      </p>
+                      <div
+                        style={{
+                          marginBottom: 8,
+                          fontSize: 13,
+                          color: "#6b7280",
+                        }}
+                      >
+                        <strong>
+                          {new Date(v.created_at).toLocaleString()}
+                        </strong>
+                      </div>
 
-                      {drillsList.length > 0 && (
-                        <>
-                          <h4 style={{ marginBottom: 4 }}>Recommended Drills</h4>
-                          <ul>
-                            {drillsList.map((d, i) => (
-                              <li key={i}>{d}</li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                    </div>
-                  )}
+                      {/* Video + report side-by-side */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 16,
+                        }}
+                      >
+                        {/* Video column */}
+                        <div
+                          style={{
+                            flex: "0 1 360px",
+                            maxWidth: "100%",
+                          }}
+                        >
+                          <video
+                            src={url}
+                            controls
+                            style={{
+                              maxWidth: "100%",
+                              width: 360,
+                              display: "block",
+                              marginBottom: 8,
+                              borderRadius: 8,
+                              border: "1px solid #e5e7eb",
+                            }}
+                          />
 
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ display: "inline-block", marginTop: 8 }}
-                  >
-                    Open video in new tab
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+                          <div style={{ marginBottom: 8 }}>
+                            <button
+                              onClick={() => handleAnalyze(v)}
+                              disabled={
+                                !!analysis || analyzingVideoId === v.id
+                              }
+                            >
+                              {analysis
+                                ? "Swing Report Ready"
+                                : analyzingVideoId === v.id
+                                ? "Creating Report..."
+                                : "Analyze Swing"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Report column */}
+                        {analysis && (
+                          <div
+                            style={{
+                              flex: "1 1 260px",
+                              minWidth: 260,
+                              background: "#f9fafb",
+                              borderRadius: 8,
+                              padding: 12,
+                              fontSize: 14,
+                            }}
+                          >
+                            <h3
+                              style={{
+                                marginTop: 0,
+                                marginBottom: 6,
+                                fontSize: 15,
+                              }}
+                            >
+                              Swing Report
+                            </h3>
+                            <p
+                              style={{
+                                whiteSpace: "pre-wrap",
+                                marginTop: 0,
+                                marginBottom: 8,
+                              }}
+                            >
+                              {analysis.feedback}
+                            </p>
+
+                            {drillsList.length > 0 && (
+                              <>
+                                <h4
+                                  style={{
+                                    marginTop: 0,
+                                    marginBottom: 4,
+                                    fontSize: 14,
+                                  }}
+                                >
+                                  Recommended Drills
+                                </h4>
+                                <ul
+                                  style={{
+                                    paddingLeft: 20,
+                                    marginTop: 0,
+                                    marginBottom: 0,
+                                  }}
+                                >
+                                  {drillsList.map((d, i) => (
+                                    <li key={i}>{d}</li>
+                                  ))}
+                                </ul>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
