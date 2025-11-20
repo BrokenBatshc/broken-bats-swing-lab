@@ -23,10 +23,19 @@ type Profile = {
   created_at: string;
 };
 
+type AnalysisRow = {
+  id: string;
+  user_id: string;
+  video_id: string;
+  feedback: string | null;
+  drills: string | string[] | null;
+  created_at: string;
+};
+
 const PLAN_LIMITS: Record<Plan, number> = {
-  swing: 9999, // essentially unlimited for now
-  minor: 3,    // 3 uploads per week
-  major: 10,   // 10 uploads per week
+  swing: 9999,
+  minor: 3,
+  major: 10,
 };
 
 const PLAN_LABELS: Record<Plan, string> = {
@@ -48,6 +57,9 @@ export default function DashboardPage() {
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [videos, setVideos] = useState<VideoRow[]>([]);
+  const [analyses, setAnalyses] = useState<Record<string, AnalysisRow>>({});
+  const [analyzingVideoId, setAnalyzingVideoId] = useState<string | null>(null);
+
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,13 +81,13 @@ export default function DashboardPage() {
     loadUser();
   }, [router]);
 
-  // Load or create profile + weekly upload count + videos
+  // Load profile, videos, analyses
   useEffect(() => {
     if (!userId) return;
 
-    async function loadProfileAndStats() {
+    async function loadAll() {
       try {
-        // 1) Load or create profile
+        // 1) Profile
         const { data: existing, error: profileError } = await supabase
           .from("profiles")
           .select("user_id, plan, created_at")
@@ -87,7 +99,6 @@ export default function DashboardPage() {
         let profile: Profile;
 
         if (!existing) {
-          // Create default profile as Major League for now
           const { data: inserted, error: insertError } = await supabase
             .from("profiles")
             .insert({
@@ -105,7 +116,7 @@ export default function DashboardPage() {
 
         setProfile(profile);
 
-        // 2) Load videos for this user
+        // 2) Videos
         const { data: videoData, error: videoError } = await supabase
           .from("videos")
           .select("id, file_path, created_at")
@@ -117,22 +128,35 @@ export default function DashboardPage() {
         const allVideos = (videoData || []) as VideoRow[];
         setVideos(allVideos);
 
-        // 3) Count videos from last 7 days
+        // Weekly count
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
         const countLastWeek = allVideos.filter((v) => {
           return new Date(v.created_at) >= sevenDaysAgo;
         }).length;
-
         setWeeklyCount(countLastWeek);
+
+        // 3) Analyses
+        const { data: analysisData, error: analysisError } = await supabase
+          .from("swing_analyses")
+          .select("id, user_id, video_id, feedback, drills, created_at")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false });
+
+        if (analysisError) throw analysisError;
+
+        const byVideo: Record<string, AnalysisRow> = {};
+        (analysisData || []).forEach((row) => {
+          byVideo[row.video_id] = row as AnalysisRow;
+        });
+        setAnalyses(byVideo);
       } catch (err: any) {
         console.error(err);
-        setError("Could not load your profile or videos.");
+        setError("Could not load your profile, videos, or analyses.");
       }
     }
 
-    loadProfileAndStats();
+    loadAll();
   }, [userId]);
 
   async function handleLogout() {
@@ -174,19 +198,16 @@ export default function DashboardPage() {
     try {
       setUploading(true);
 
-      // Unique path: userId/timestamp_filename
       const timestamp = Date.now();
       const safeName = file.name.replace(/\s+/g, "-");
       const path = `${userId}/${timestamp}-${safeName}`;
 
-      // Upload to the "swings" bucket
       const { error: uploadError } = await supabase.storage
         .from("swings")
         .upload(path, file);
 
       if (uploadError) throw uploadError;
 
-      // Save a row in the "videos" table
       const { data, error: insertError } = await supabase
         .from("videos")
         .insert({
@@ -199,13 +220,9 @@ export default function DashboardPage() {
       if (insertError) throw insertError;
 
       const newVideo = data as VideoRow;
-
-      // Update local state
       setVideos((prev) => [newVideo, ...prev]);
       setFile(null);
       setMessage("Upload complete! Your swing has been saved.");
-
-      // Bump weekly count
       setWeeklyCount((prev) => prev + 1);
     } catch (err: any) {
       console.error(err);
@@ -215,10 +232,61 @@ export default function DashboardPage() {
     }
   }
 
-  // Helper to get a public URL for a file
   function getVideoUrl(filePath: string) {
     const { data } = supabase.storage.from("swings").getPublicUrl(filePath);
     return data.publicUrl;
+  }
+
+  async function handleAnalyze(video: VideoRow) {
+    if (!userId) return;
+
+    setError(null);
+    setMessage(null);
+    setAnalyzingVideoId(video.id);
+
+    try {
+      const videoUrl = getVideoUrl(video.file_path);
+
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoUrl }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Analysis request failed");
+      }
+
+      const data = await res.json();
+      const feedback: string = data.feedback || "";
+      const drills: string[] = data.drills || [];
+
+      // Save to Supabase
+      const { data: inserted, error: insertError } = await supabase
+        .from("swing_analyses")
+        .insert({
+          user_id: userId,
+          video_id: video.id,
+          feedback,
+          drills: JSON.stringify(drills),
+        })
+        .select("id, user_id, video_id, feedback, drills, created_at")
+        .single();
+
+      if (insertError) throw insertError;
+
+      const row = inserted as AnalysisRow;
+      setAnalyses((prev) => ({
+        ...prev,
+        [video.id]: row,
+      }));
+      setMessage("Analysis complete! Scroll down to see your feedback.");
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Analysis failed.");
+    } finally {
+      setAnalyzingVideoId(null);
+    }
   }
 
   if (loadingUser) {
@@ -283,6 +351,21 @@ export default function DashboardPage() {
           <ul style={{ listStyle: "none", padding: 0 }}>
             {videos.map((v) => {
               const url = getVideoUrl(v.file_path);
+              const analysis = analyses[v.id];
+
+              let drillsList: string[] = [];
+              if (analysis?.drills) {
+                if (typeof analysis.drills === "string") {
+                  try {
+                    drillsList = JSON.parse(analysis.drills);
+                  } catch {
+                    drillsList = [analysis.drills];
+                  }
+                } else {
+                  drillsList = analysis.drills;
+                }
+              }
+
               return (
                 <li
                   key={v.id}
@@ -309,10 +392,52 @@ export default function DashboardPage() {
                     }}
                   />
 
+                  <div style={{ marginBottom: 8 }}>
+                    <button
+                      onClick={() => handleAnalyze(v)}
+                      disabled={!!analysis || analyzingVideoId === v.id}
+                    >
+                      {analysis
+                        ? "Analysis Complete"
+                        : analyzingVideoId === v.id
+                        ? "Analyzing..."
+                        : "Analyze Swing"}
+                    </button>
+                  </div>
+
+                  {analysis && (
+                    <div
+                      style={{
+                        background: "#f6f6f6",
+                        padding: 12,
+                        borderRadius: 4,
+                      }}
+                    >
+                      <h3 style={{ marginTop: 0, marginBottom: 8 }}>
+                        AI Feedback
+                      </h3>
+                      <p style={{ whiteSpace: "pre-wrap" }}>
+                        {analysis.feedback}
+                      </p>
+
+                      {drillsList.length > 0 && (
+                        <>
+                          <h4 style={{ marginBottom: 4 }}>Recommended Drills</h4>
+                          <ul>
+                            {drillsList.map((d, i) => (
+                              <li key={i}>{d}</li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   <a
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
+                    style={{ display: "inline-block", marginTop: 8 }}
                   >
                     Open video in new tab
                   </a>
