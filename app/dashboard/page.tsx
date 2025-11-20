@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState, ChangeEvent, FormEvent } from "react";
+import {
+  useEffect,
+  useState,
+  ChangeEvent,
+  FormEvent,
+} from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
@@ -10,11 +15,35 @@ type VideoRow = {
   created_at: string;
 };
 
+type Plan = "minor" | "major" | "swing";
+
+type Profile = {
+  user_id: string;
+  plan: Plan;
+  created_at: string;
+};
+
+const PLAN_LIMITS: Record<Plan, number> = {
+  swing: 9999, // essentially unlimited for now
+  minor: 3,    // 3 uploads per week
+  major: 10,   // 10 uploads per week
+};
+
+const PLAN_LABELS: Record<Plan, string> = {
+  swing: "Swing Analysis (per-clip)",
+  minor: "Minor League – 3 uploads/week",
+  major: "Major League – 10 uploads/week",
+};
+
 export default function DashboardPage() {
   const router = useRouter();
+
   const [loadingUser, setLoadingUser] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [weeklyCount, setWeeklyCount] = useState<number>(0);
 
   const [uploading, setUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -40,27 +69,70 @@ export default function DashboardPage() {
     loadUser();
   }, [router]);
 
-  // Load videos once we know userId
+  // Load or create profile + weekly upload count + videos
   useEffect(() => {
     if (!userId) return;
 
-    async function loadVideos() {
-      const { data, error } = await supabase
-        .from("videos")
-        .select("id, file_path, created_at")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
+    async function loadProfileAndStats() {
+      try {
+        // 1) Load or create profile
+        const { data: existing, error: profileError } = await supabase
+          .from("profiles")
+          .select("user_id, plan, created_at")
+          .eq("user_id", userId)
+          .maybeSingle();
 
-      if (error) {
-        console.error(error);
-        setError("Could not load your videos.");
-        return;
+        if (profileError) throw profileError;
+
+        let profile: Profile;
+
+        if (!existing) {
+          // Create default profile as Major League for now
+          const { data: inserted, error: insertError } = await supabase
+            .from("profiles")
+            .insert({
+              user_id: userId,
+              plan: "major",
+            })
+            .select("user_id, plan, created_at")
+            .single();
+
+          if (insertError) throw insertError;
+          profile = inserted as Profile;
+        } else {
+          profile = existing as Profile;
+        }
+
+        setProfile(profile);
+
+        // 2) Load videos for this user
+        const { data: videoData, error: videoError } = await supabase
+          .from("videos")
+          .select("id, file_path, created_at")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false });
+
+        if (videoError) throw videoError;
+
+        const allVideos = (videoData || []) as VideoRow[];
+        setVideos(allVideos);
+
+        // 3) Count videos from last 7 days
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const countLastWeek = allVideos.filter((v) => {
+          return new Date(v.created_at) >= sevenDaysAgo;
+        }).length;
+
+        setWeeklyCount(countLastWeek);
+      } catch (err: any) {
+        console.error(err);
+        setError("Could not load your profile or videos.");
       }
-
-      setVideos(data || []);
     }
 
-    loadVideos();
+    loadProfileAndStats();
   }, [userId]);
 
   async function handleLogout() {
@@ -84,8 +156,18 @@ export default function DashboardPage() {
       setError("Please choose a file first.");
       return;
     }
-    if (!userId) {
+    if (!userId || !profile) {
       setError("You must be logged in to upload.");
+      return;
+    }
+
+    const plan = profile.plan;
+    const limit = PLAN_LIMITS[plan];
+
+    if (weeklyCount >= limit) {
+      setError(
+        `You have reached your weekly limit for the ${PLAN_LABELS[plan]} plan (${limit} uploads per rolling 7 days).`
+      );
       return;
     }
 
@@ -116,11 +198,15 @@ export default function DashboardPage() {
 
       if (insertError) throw insertError;
 
-      if (data) {
-        setVideos((prev) => [data as VideoRow, ...prev]);
-      }
+      const newVideo = data as VideoRow;
+
+      // Update local state
+      setVideos((prev) => [newVideo, ...prev]);
       setFile(null);
       setMessage("Upload complete! Your swing has been saved.");
+
+      // Bump weekly count
+      setWeeklyCount((prev) => prev + 1);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Upload failed.");
@@ -139,16 +225,27 @@ export default function DashboardPage() {
     return <p>Loading your dashboard...</p>;
   }
 
+  const plan = profile?.plan ?? "major";
+  const limit = PLAN_LIMITS[plan];
+  const uploadsLeft = Math.max(limit - weeklyCount, 0);
+
   return (
     <div>
       <h1>Dashboard</h1>
       <p>Welcome{email ? `, ${email}` : ""}.</p>
+
+      <p style={{ marginTop: 8 }}>
+        <strong>Current Plan:</strong> {PLAN_LABELS[plan]}
+      </p>
       <p>
-        This is your Swing Lab home: uploads, feedback, and drills will all show
-        up here.
+        <strong>Uploads this week:</strong> {weeklyCount} / {limit} &nbsp;|&nbsp;
+        <strong>Remaining:</strong> {uploadsLeft}
       </p>
 
-      <button style={{ marginTop: 16, marginBottom: 32 }} onClick={handleLogout}>
+      <button
+        style={{ marginTop: 16, marginBottom: 32 }}
+        onClick={handleLogout}
+      >
         Log Out
       </button>
 
@@ -158,7 +255,12 @@ export default function DashboardPage() {
 
         <form
           onSubmit={handleUpload}
-          style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 400 }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            maxWidth: 400,
+          }}
         >
           <input type="file" accept="video/*" onChange={handleFileChange} />
 
@@ -167,7 +269,9 @@ export default function DashboardPage() {
           </button>
         </form>
 
-        {message && <p style={{ marginTop: 8, color: "green" }}>{message}</p>}
+        {message && (
+          <p style={{ marginTop: 8, color: "green" }}>{message}</p>
+        )}
         {error && <p style={{ marginTop: 8, color: "red" }}>{error}</p>}
       </section>
 
@@ -189,21 +293,27 @@ export default function DashboardPage() {
                   }}
                 >
                   <div style={{ marginBottom: 4 }}>
-                    <strong>{new Date(v.created_at).toLocaleString()}</strong>
-                  </div>
-                  <div style={{ marginBottom: 8, fontSize: 12 }}>
-                    Path: {v.file_path}
+                    <strong>
+                      {new Date(v.created_at).toLocaleString()}
+                    </strong>
                   </div>
 
-                  {/* Inline video player */}
                   <video
                     src={url}
                     controls
-                    style={{ maxWidth: "100%", width: 320, display: "block", marginBottom: 8 }}
+                    style={{
+                      maxWidth: "100%",
+                      width: 320,
+                      display: "block",
+                      marginBottom: 8,
+                    }}
                   />
 
-                  {/* Direct link, in case the player has issues */}
-                  <a href={url} target="_blank" rel="noopener noreferrer">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     Open video in new tab
                   </a>
                 </li>
@@ -215,4 +325,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
